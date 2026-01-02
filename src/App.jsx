@@ -1,4 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  addDoc, 
+  onSnapshot, 
+  deleteDoc, 
+  updateDoc, 
+  query 
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
 import { 
   Calendar, 
   Users, 
@@ -27,45 +44,82 @@ import {
   GraduationCap
 } from 'lucide-react';
 
+// Firebase Config
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
 const App = () => {
   // CONFIGURAÇÃO DE SEGURANÇA
-  const ADMIN_PIN = "101989"; // Mude sua senha aqui
+  const ADMIN_PIN = "1234"; 
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [authError, setAuthError] = useState(false);
+  const [user, setUser] = useState(null);
 
   const [activeWeek, setActiveWeek] = useState(1);
   const [activeTab, setActiveTab] = useState('cronograma');
   const [completedTasks, setCompletedTasks] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Estados para dados do banco
+  const [students, setStudents] = useState([]);
+  const [staffMembers, setStaffMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
   // Estados para novos cadastros
   const [newStudent, setNewStudent] = useState({ nome: '', responsavel: '', periodo: 'Integral', turmaOriginal: 'Turma B', colônia: 'Exploradores' });
   const [newStaff, setNewStaff] = useState({ nome: '', periodo: 'Integral', semana: 1, funcao: 'Professor', turma: 'Exploradores' });
 
-  // Lista de Alunos
-  const [students, setStudents] = useState([
-    { id: 1, nome: "Arthur Henrique Corá de Paula", responsavel: "Simone Cristiani Zeni Corá", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 2, nome: "Dom Peccin Dorini", responsavel: "Ellen Cristina Peccin Ferreira Dorini", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 3, nome: "Emanuel Levi Franco Scur Ewuame", responsavel: "Maria Eduarda Franco Scur", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 4, nome: "Francisco Drey Signori", responsavel: "Karen das Graças Drey", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 5, nome: "Gabrielly Crittina Calderoli Nunes", responsavel: "Monize Calderoli", periodo: "Integral", turmaOriginal: "Turma A", colônia: "Berçário" },
-    { id: 6, nome: "Isabel Piovezan Hilla", responsavel: "Gessica Piovezan", periodo: "Integral", turmaOriginal: "Turma A", colônia: "Berçário" },
-    { id: 7, nome: "Lara Sivieiro", responsavel: "Talita S. Bazi Siviero", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 8, nome: "Laura Casagrande Ramos", responsavel: "Edinei Ramos", periodo: "Integral", turmaOriginal: "Turma A", colônia: "Berçário" },
-    { id: 9, nome: "Lorenzo Buselato de Campos", responsavel: "Tanicler Buselato Alves de Campos", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 10, nome: "Lucca Maziero de Lima", responsavel: "Camila Maziero", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 11, nome: "Luiz Otávio Schmidke Garcia", responsavel: "Joseani Schmidke", periodo: "Integral", turmaOriginal: "Turma A", colônia: "Berçário" },
-    { id: 12, nome: "Maria Clara Zanini de Mello", responsavel: "Schaiane Zanini", periodo: "Integral", turmaOriginal: "Turma A", colônia: "Berçário" },
-    { id: 13, nome: "Maria Júlia Mittelstaedt Teixeira", responsavel: "Julie Fátima Mittelstaedt", periodo: "Matutino", turmaOriginal: "Turma B", colônia: "Exploradores" },
-    { id: 14, nome: "Miguel Angelo Alves Baretta", responsavel: "Elizania Gabriela Alves Baretta", periodo: "Integral", turmaOriginal: "Turma B", colônia: "Exploradores" },
-  ]);
+  // 1. Efeito de Autenticação
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Erro na autenticação:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
 
-  // Lista de Colaboradores (Jornadas)
-  const [staffMembers, setStaffMembers] = useState([
-    { id: 1, nome: "Coordenador Principal", periodo: "Integral", semana: 1, funcao: "Coordenador", turma: "Geral" },
-  ]);
+  // 2. Efeito para buscar Alunos
+  useEffect(() => {
+    if (!user) return;
+    const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'students');
+    const q = query(studentsRef);
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setStudents(data);
+      setLoading(false);
+    }, (error) => console.error("Erro ao buscar alunos:", error));
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 3. Efeito para buscar Jornadas
+  useEffect(() => {
+    if (!user) return;
+    const staffRef = collection(db, 'artifacts', appId, 'public', 'data', 'staff');
+    const q = query(staffRef);
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setStaffMembers(data);
+    }, (error) => console.error("Erro ao buscar jornada:", error));
+
+    return () => unsubscribe();
+  }, [user]);
 
   const handleAuth = () => {
     if (pinInput === ADMIN_PIN) {
@@ -79,47 +133,59 @@ const App = () => {
     }
   };
 
-  const togglePeriod = (id, type) => {
-    if (!isAdmin) return;
-    const setter = type === 'student' ? setStudents : setStaffMembers;
-    setter(prev => prev.map(item => {
-      if (item.id === id) {
-        const next = {
-          "Integral": "Matutino",
-          "Matutino": "Vespertino",
-          "Vespertino": "Integral"
-        };
-        return { ...item, periodo: next[item.periodo] };
-      }
-      return item;
-    }));
+  const togglePeriod = async (id, currentPeriod, type) => {
+    if (!isAdmin || !user) return;
+    const next = {
+      "Integral": "Matutino",
+      "Matutino": "Vespertino",
+      "Vespertino": "Integral"
+    };
+    
+    const collectionName = type === 'student' ? 'students' : 'staff';
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, id);
+    
+    try {
+      await updateDoc(docRef, { periodo: next[currentPeriod] });
+    } catch (error) {
+      console.error("Erro ao atualizar período:", error);
+    }
   };
 
-  const addStudent = () => {
-    if (!isAdmin || !newStudent.nome) return;
-    setStudents([...students, { ...newStudent, id: Date.now() }]);
-    setNewStudent({ nome: '', responsavel: '', periodo: 'Integral', turmaOriginal: 'Turma B', colônia: 'Exploradores' });
+  const addStudent = async () => {
+    if (!isAdmin || !newStudent.nome || !user) return;
+    try {
+      const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'students');
+      await addDoc(studentsRef, { ...newStudent, timestamp: Date.now() });
+      setNewStudent({ nome: '', responsavel: '', periodo: 'Integral', turmaOriginal: 'Turma B', colônia: 'Exploradores' });
+    } catch (error) {
+      console.error("Erro ao adicionar aluno:", error);
+    }
   };
 
-  const addStaff = () => {
-    if (!isAdmin || !newStaff.nome) return;
-    setStaffMembers([...staffMembers, { ...newStaff, id: Date.now(), semana: activeWeek }]);
-    setNewStaff({ ...newStaff, nome: '' });
+  const addStaff = async () => {
+    if (!isAdmin || !newStaff.nome || !user) return;
+    try {
+      const staffRef = collection(db, 'artifacts', appId, 'public', 'data', 'staff');
+      await addDoc(staffRef, { ...newStaff, semana: activeWeek, timestamp: Date.now() });
+      setNewStaff({ ...newStaff, nome: '' });
+    } catch (error) {
+      console.error("Erro ao adicionar colaborador:", error);
+    }
   };
 
-  const removeStudent = (id) => {
-    if (!isAdmin) return;
-    setStudents(students.filter(s => s.id !== id));
-  };
-
-  const removeStaff = (id) => {
-    if (!isAdmin) return;
-    setStaffMembers(staffMembers.filter(s => s.id !== id));
+  const removeDocument = async (id, collectionName) => {
+    if (!isAdmin || !user) return;
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, id);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.error("Erro ao remover documento:", error);
+    }
   };
 
   const filteredStudents = students.filter(s => 
-    s.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    s.responsavel.toLowerCase().includes(searchTerm.toLowerCase())
+    s.nome?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    s.responsavel?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const filteredStaff = staffMembers.filter(s => s.semana === activeWeek);
@@ -362,54 +428,58 @@ const App = () => {
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-100 text-slate-500 uppercase text-[9px] font-black tracking-[0.15em] border-b border-slate-200">
-                    <tr>
-                      <th className="px-6 py-4">Criança / Responsável</th>
-                      <th className="px-6 py-4 text-center">Turno</th>
-                      <th className="px-6 py-4 text-center">Grupo Colônia</th>
-                      <th className="px-6 py-4">Turma Orig.</th>
-                      {isAdmin && <th className="px-6 py-4 text-center">Ação</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredStudents.map((s) => (
-                      <tr key={s.id} className="hover:bg-blue-50/30 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-slate-800">{s.nome}</div>
-                          <div className="text-[9px] text-slate-400 font-medium italic">{s.responsavel}</div>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <button 
-                            disabled={!isAdmin}
-                            onClick={() => togglePeriod(s.id, 'student')}
-                            className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${!isAdmin ? 'cursor-default' : 'hover:scale-105 shadow-sm active:scale-95'} ${
-                              s.periodo === "Integral" ? "bg-green-600 text-white border-green-700" :
-                              s.periodo === "Matutino" ? "bg-blue-500 text-white border-blue-600" :
-                              "bg-orange-500 text-white border-orange-600"
-                            }`}>
-                            {s.periodo}
-                          </button>
-                        </td>
-                        <td className="px-6 py-4 text-center font-bold tracking-tight">
-                          <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase border-b-2 shadow-sm ${
-                            s.colônia === "Berçário" ? "bg-pink-100 text-pink-700 border-pink-300" : "bg-indigo-100 text-indigo-700 border-indigo-300"
-                          }`}>
-                            {s.colônia}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-500 font-bold uppercase text-[10px]">{s.turmaOriginal}</td>
-                        {isAdmin && (
+                {loading ? (
+                   <div className="p-10 text-center text-slate-400 italic">Sincronizando dados...</div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 text-slate-500 uppercase text-[9px] font-black tracking-[0.15em] border-b border-slate-200">
+                      <tr>
+                        <th className="px-6 py-4">Criança / Responsável</th>
+                        <th className="px-6 py-4 text-center">Turno</th>
+                        <th className="px-6 py-4 text-center">Grupo Colônia</th>
+                        <th className="px-6 py-4">Turma Orig.</th>
+                        {isAdmin && <th className="px-6 py-4 text-center">Ação</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredStudents.map((s) => (
+                        <tr key={s.id} className="hover:bg-blue-50/30 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-slate-800">{s.nome}</div>
+                            <div className="text-[9px] text-slate-400 font-medium italic">{s.responsavel}</div>
+                          </td>
                           <td className="px-6 py-4 text-center">
-                            <button onClick={() => removeStudent(s.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
-                              <Trash2 className="w-4 h-4" />
+                            <button 
+                              disabled={!isAdmin}
+                              onClick={() => togglePeriod(s.id, s.periodo, 'student')}
+                              className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${!isAdmin ? 'cursor-default' : 'hover:scale-105 shadow-sm active:scale-95'} ${
+                                s.periodo === "Integral" ? "bg-green-600 text-white border-green-700" :
+                                s.periodo === "Matutino" ? "bg-blue-500 text-white border-blue-600" :
+                                "bg-orange-500 text-white border-orange-600"
+                              }`}>
+                              {s.periodo}
                             </button>
                           </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          <td className="px-6 py-4 text-center font-bold tracking-tight">
+                            <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase border-b-2 shadow-sm ${
+                              s.colônia === "Berçário" ? "bg-pink-100 text-pink-700 border-pink-300" : "bg-indigo-100 text-indigo-700 border-indigo-300"
+                            }`}>
+                              {s.colônia}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-slate-500 font-bold uppercase text-[10px]">{s.turmaOriginal}</td>
+                          {isAdmin && (
+                            <td className="px-6 py-4 text-center">
+                              <button onClick={() => removeDocument(s.id, 'students')} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           </div>
@@ -523,7 +593,7 @@ const App = () => {
                             <td className="px-6 py-4 text-center">
                               <button 
                                 disabled={!isAdmin}
-                                onClick={() => togglePeriod(s.id, 'staff')}
+                                onClick={() => togglePeriod(s.id, s.periodo, 'staff')}
                                 className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${!isAdmin ? 'cursor-default' : 'hover:scale-105 active:scale-95 shadow-sm'} ${
                                   s.periodo === "Integral" ? "bg-green-600 text-white border-green-700" :
                                   s.periodo === "Matutino" ? "bg-blue-500 text-white border-blue-600" :
@@ -534,7 +604,7 @@ const App = () => {
                             </td>
                             {isAdmin && (
                               <td className="px-6 py-4 text-center">
-                                <button onClick={() => removeStaff(s.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
+                                <button onClick={() => removeDocument(s.id, 'staff')} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </td>
