@@ -53,7 +53,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 const App = () => {
   // CONFIGURAÇÃO DE SEGURANÇA
-  const ADMIN_PIN = "1234"; 
+  const ADMIN_PIN = "101989"; 
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
