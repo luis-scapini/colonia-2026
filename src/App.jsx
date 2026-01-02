@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
+// Usando importações amigáveis ao Vite para evitar erros de 'Dynamic Require'
+import { initializeApp } from 'https://esm.sh/firebase@11.1.0/app';
 import { 
   getFirestore, 
   collection, 
@@ -8,14 +9,15 @@ import {
   onSnapshot, 
   deleteDoc, 
   updateDoc, 
-  query 
-} from 'firebase/firestore';
+  query,
+  orderBy
+} from 'https://esm.sh/firebase@11.1.0/firestore';
 import { 
   getAuth, 
   signInAnonymously, 
   signInWithCustomToken, 
   onAuthStateChanged 
-} from 'firebase/auth';
+} from 'https://esm.sh/firebase@11.1.0/auth';
 import { 
   Calendar, 
   Users, 
@@ -44,7 +46,7 @@ import {
   GraduationCap
 } from 'lucide-react';
 
-// Firebase Config
+// Configuração do Firebase extraída das globais do ambiente
 const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -53,7 +55,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 const App = () => {
   // CONFIGURAÇÃO DE SEGURANÇA
-  const ADMIN_PIN = "101989"; 
+  const ADMIN_PIN = "1234"; 
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
@@ -65,16 +67,20 @@ const App = () => {
   const [completedTasks, setCompletedTasks] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Estados para dados do banco
+  // Estados para dados sincronizados com o Banco de Dados
   const [students, setStudents] = useState([]);
   const [staffMembers, setStaffMembers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Estados para novos cadastros
-  const [newStudent, setNewStudent] = useState({ nome: '', responsavel: '', periodo: 'Integral', turmaOriginal: 'Turma B', colônia: 'Exploradores' });
-  const [newStaff, setNewStaff] = useState({ nome: '', periodo: 'Integral', semana: 1, funcao: 'Professor', turma: 'Exploradores' });
+  // Estados para novos cadastros (Modo Admin)
+  const [newStudent, setNewStudent] = useState({ 
+    nome: '', responsavel: '', periodo: 'Integral', turmaOriginal: 'Turma B', colônia: 'Exploradores' 
+  });
+  const [newStaff, setNewStaff] = useState({ 
+    nome: '', periodo: 'Integral', semana: 1, funcao: 'Professor', turma: 'Exploradores' 
+  });
 
-  // 1. Efeito de Autenticação
+  // 1. Inicialização da Autenticação (Necessário para Firestore)
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -84,7 +90,7 @@ const App = () => {
           await signInAnonymously(auth);
         }
       } catch (error) {
-        console.error("Erro na autenticação:", error);
+        console.error("Falha na autenticação:", error);
       }
     };
     initAuth();
@@ -92,31 +98,28 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. Efeito para buscar Alunos
+  // 2. Sincronização em Tempo Real de ALUNOS
   useEffect(() => {
     if (!user) return;
     const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'students');
-    const q = query(studentsRef);
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    // Busca todos os alunos sem filtros complexos para evitar erros de índice
+    const unsubscribe = onSnapshot(studentsRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setStudents(data);
       setLoading(false);
-    }, (error) => console.error("Erro ao buscar alunos:", error));
+    }, (error) => console.error("Erro ao sincronizar alunos:", error));
 
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Efeito para buscar Jornadas
+  // 3. Sincronização em Tempo Real de JORNADAS (Staff)
   useEffect(() => {
     if (!user) return;
     const staffRef = collection(db, 'artifacts', appId, 'public', 'data', 'staff');
-    const q = query(staffRef);
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(staffRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setStaffMembers(data);
-    }, (error) => console.error("Erro ao buscar jornada:", error));
+    }, (error) => console.error("Erro ao sincronizar jornada:", error));
 
     return () => unsubscribe();
   }, [user]);
@@ -155,7 +158,7 @@ const App = () => {
     if (!isAdmin || !newStudent.nome || !user) return;
     try {
       const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'students');
-      await addDoc(studentsRef, { ...newStudent, timestamp: Date.now() });
+      await addDoc(studentsRef, { ...newStudent, createdAt: Date.now() });
       setNewStudent({ nome: '', responsavel: '', periodo: 'Integral', turmaOriginal: 'Turma B', colônia: 'Exploradores' });
     } catch (error) {
       console.error("Erro ao adicionar aluno:", error);
@@ -166,7 +169,7 @@ const App = () => {
     if (!isAdmin || !newStaff.nome || !user) return;
     try {
       const staffRef = collection(db, 'artifacts', appId, 'public', 'data', 'staff');
-      await addDoc(staffRef, { ...newStaff, semana: activeWeek, timestamp: Date.now() });
+      await addDoc(staffRef, { ...newStaff, semana: activeWeek, createdAt: Date.now() });
       setNewStaff({ ...newStaff, nome: '' });
     } catch (error) {
       console.error("Erro ao adicionar colaborador:", error);
@@ -235,13 +238,13 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-12">
-      {/* Modal de PIN */}
+      {/* Modal de PIN Administrador */}
       {showPinModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl">
             <div className="text-center mb-6">
-              <div className="bg-blue-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Key className="text-blue-600 w-6 h-6" />
+              <div className="bg-blue-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 text-blue-600">
+                <Key className="w-6 h-6" />
               </div>
               <h2 className="text-xl font-bold">Modo Administrador</h2>
               <p className="text-slate-500 text-sm mt-1">Digite o PIN para habilitar edições</p>
@@ -252,20 +255,20 @@ const App = () => {
               value={pinInput}
               onChange={(e) => setPinInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAuth()}
-              className={`w-full text-center text-2xl tracking-[1em] p-3 bg-slate-100 rounded-xl border-2 outline-none transition-all ${authError ? 'border-red-500 animate-pulse' : 'border-transparent focus:border-blue-500'}`}
+              className={`w-full text-center text-2xl tracking-[1em] p-3 bg-slate-100 rounded-xl border-2 outline-none transition-all ${authError ? 'border-red-500' : 'border-transparent focus:border-blue-500'}`}
               autoFocus
             />
             {authError && <p className="text-red-500 text-xs mt-2 text-center font-bold uppercase">PIN Incorreto</p>}
             <div className="grid grid-cols-2 gap-3 mt-6">
               <button 
                 onClick={() => {setShowPinModal(false); setAuthError(false); setPinInput("");}}
-                className="px-4 py-2 text-slate-500 font-bold text-sm hover:bg-slate-100 rounded-lg transition-colors"
+                className="px-4 py-2 text-slate-500 font-bold text-sm hover:bg-slate-100 rounded-lg"
               >
                 Cancelar
               </button>
               <button 
                 onClick={handleAuth}
-                className="px-4 py-2 bg-blue-600 text-white font-bold text-sm rounded-lg hover:bg-blue-700 shadow-md transition-all active:scale-95"
+                className="px-4 py-2 bg-blue-600 text-white font-bold text-sm rounded-lg hover:bg-blue-700"
               >
                 Acessar
               </button>
@@ -274,24 +277,20 @@ const App = () => {
         </div>
       )}
 
-      {/* Header Fixo */}
+      {/* Header com Navegação e Controle de Admin */}
       <div className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2 tracking-tighter">
-                Colônia de Férias 2026 🚀
-              </h1>
-              <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest opacity-70">Escola Interna | Berçário e Exploradores</p>
+              <h1 className="text-2xl font-bold flex items-center gap-2">Colônia de Férias 2026 🚀</h1>
+              <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest opacity-70">Sincronizado com Nuvem | Berçário e Exploradores</p>
             </div>
-            {/* Botão de Admin */}
             <button 
               onClick={() => isAdmin ? setIsAdmin(false) : setShowPinModal(true)}
-              className={`p-2 rounded-full transition-all flex items-center gap-2 group ${isAdmin ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-slate-100 text-slate-400 border border-slate-200 hover:text-blue-500 hover:bg-blue-50'}`}
-              title={isAdmin ? "Modo Edição Ativado" : "Clique para Editar"}
+              className={`p-2 rounded-full transition-all flex items-center gap-2 ${isAdmin ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}
             >
               {isAdmin ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-              <span className="text-[10px] font-bold pr-1">{isAdmin ? "ADMIN" : "LEITURA"}</span>
+              <span className="text-[10px] font-bold">{isAdmin ? "ADMIN" : "LEITURA"}</span>
             </button>
           </div>
           <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto">
@@ -312,18 +311,18 @@ const App = () => {
 
       <div className="max-w-6xl mx-auto px-4 mt-8">
         
-        {/* ABA 1: CRONOGRAMA */}
+        {/* AGENDA SEMANAL */}
         {activeTab === 'cronograma' && (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
             <div className="lg:col-span-1 space-y-4">
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 text-center">
-                <h2 className="font-bold text-slate-800 mb-4 text-xs uppercase tracking-wider">Selecionar Semana</h2>
+                <h2 className="font-bold text-slate-800 mb-4 text-xs uppercase tracking-wider text-left pl-2">Semanas</h2>
                 <div className="grid grid-cols-3 lg:grid-cols-1 gap-2">
                   {weeks.map(w => (
                     <button key={w.id} onClick={() => setActiveWeek(w.id)}
                       className={`p-3 rounded-xl border transition-all ${activeWeek === w.id ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-100 text-slate-600'}`}>
-                      <div className="font-bold text-xs uppercase tracking-widest">S{w.id}</div>
-                      <div className="text-[10px] opacity-70">{w.dates}</div>
+                      <div className="font-bold text-xs uppercase tracking-widest text-left">Semana {w.id}</div>
+                      <div className="text-[10px] opacity-70 text-left italic">{w.dates}</div>
                     </button>
                   ))}
                 </div>
@@ -349,11 +348,11 @@ const App = () => {
                         </div>
                       </div>
                       <div className="md:col-span-5">
-                        <h4 className="text-[10px] font-bold text-blue-600 uppercase mb-1 flex items-center gap-1"><Smile className="w-3 h-3"/> Exploradores</h4>
+                        <h4 className="text-[10px] font-bold text-blue-600 uppercase mb-1 flex items-center gap-1"><Smile className="w-3 h-3"/> Exploradores (Maiores)</h4>
                         <p className="font-bold text-slate-800 text-sm tracking-tight">{act.title}</p>
                       </div>
                       <div className="md:col-span-5 bg-pink-50/50 p-3 rounded-lg border border-pink-100">
-                        <h4 className="text-[10px] font-bold text-pink-600 uppercase mb-1 flex items-center gap-1"><Baby className="w-3 h-3"/> Berçário</h4>
+                        <h4 className="text-[10px] font-bold text-pink-600 uppercase mb-1 flex items-center gap-1"><Baby className="w-3 h-3"/> Berçário (Baby)</h4>
                         <p className="text-pink-900 text-xs italic font-medium tracking-tight">"{act.baby}"</p>
                       </div>
                     </div>
@@ -364,48 +363,28 @@ const App = () => {
           </div>
         )}
 
-        {/* ABA 2: ALUNOS */}
+        {/* GESTÃO DE ALUNOS */}
         {activeTab === 'alunos' && (
           <div className="space-y-6">
             {isAdmin && (
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 border-t-4 border-blue-600 animate-in fade-in slide-in-from-top-4 duration-300">
-                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 italic uppercase tracking-tighter">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 border-t-4 border-blue-600">
+                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-tighter">
                   <UserPlus className="w-4 h-4 text-blue-600" /> Cadastrar Criança na Colônia
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                  <input 
-                    type="text" placeholder="Nome Completo" 
-                    value={newStudent.nome} 
-                    onChange={e => setNewStudent({...newStudent, nome: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input 
-                    type="text" placeholder="Pai/Mãe" 
-                    value={newStudent.responsavel} 
-                    onChange={e => setNewStudent({...newStudent, responsavel: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <select 
-                    value={newStudent.periodo} 
-                    onChange={e => setNewStudent({...newStudent, periodo: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="Integral">Integral</option>
-                    <option value="Matutino">Matutino</option>
-                    <option value="Vespertino">Vespertino</option>
+                  <input type="text" placeholder="Nome Completo" value={newStudent.nome} onChange={e => setNewStudent({...newStudent, nome: e.target.value})}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input type="text" placeholder="Pai/Mãe" value={newStudent.responsavel} onChange={e => setNewStudent({...newStudent, responsavel: e.target.value})}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                  <select value={newStudent.periodo} onChange={e => setNewStudent({...newStudent, periodo: e.target.value})}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="Integral">Integral</option><option value="Matutino">Matutino</option><option value="Vespertino">Vespertino</option>
                   </select>
-                  <select 
-                    value={newStudent.colônia} 
-                    onChange={e => setNewStudent({...newStudent, colônia: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="Exploradores">Exploradores</option>
-                    <option value="Berçário">Berçário</option>
+                  <select value={newStudent.colônia} onChange={e => setNewStudent({...newStudent, colônia: e.target.value})}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="Exploradores">Exploradores</option><option value="Berçário">Berçário</option>
                   </select>
-                  <button 
-                    onClick={addStudent}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-blue-700 flex items-center justify-center gap-2 shadow-md"
-                  >
+                  <button onClick={addStudent} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-blue-700 flex items-center justify-center gap-2">
                     <Plus className="w-4 h-4" /> Salvar
                   </button>
                 </div>
@@ -414,23 +393,15 @@ const App = () => {
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center bg-slate-50/50 gap-4">
-                <h2 className="font-bold text-lg flex items-center gap-2 text-slate-800 tracking-tight">
-                  <Users className="w-5 h-5 text-blue-500" /> Lista de Frequência
-                </h2>
+                <h2 className="font-bold text-lg flex items-center gap-2 text-slate-800 tracking-tight"><Users className="w-5 h-5 text-blue-500" /> Lista de Frequência</h2>
                 <div className="relative w-full md:w-64">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input 
-                    type="text" placeholder="Filtrar por nome ou responsável..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-full text-xs focus:ring-2 focus:ring-blue-500 outline-none shadow-inner" 
-                  />
+                  <input type="text" placeholder="Filtrar por nome..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-full text-xs outline-none shadow-inner" />
                 </div>
               </div>
               <div className="overflow-x-auto">
-                {loading ? (
-                   <div className="p-10 text-center text-slate-400 italic">Sincronizando dados...</div>
-                ) : (
+                {loading ? <div className="p-10 text-center text-slate-400 italic">Sincronizando com Banco de Dados...</div> : (
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-100 text-slate-500 uppercase text-[9px] font-black tracking-[0.15em] border-b border-slate-200">
                       <tr>
@@ -444,37 +415,18 @@ const App = () => {
                     <tbody className="divide-y divide-slate-100">
                       {filteredStudents.map((s) => (
                         <tr key={s.id} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-slate-800">{s.nome}</div>
-                            <div className="text-[9px] text-slate-400 font-medium italic">{s.responsavel}</div>
-                          </td>
+                          <td className="px-6 py-4 font-bold text-slate-800">{s.nome}<div className="text-[9px] text-slate-400 font-medium italic">{s.responsavel}</div></td>
                           <td className="px-6 py-4 text-center">
-                            <button 
-                              disabled={!isAdmin}
-                              onClick={() => togglePeriod(s.id, s.periodo, 'student')}
-                              className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${!isAdmin ? 'cursor-default' : 'hover:scale-105 shadow-sm active:scale-95'} ${
+                            <button disabled={!isAdmin} onClick={() => togglePeriod(s.id, s.periodo, 'student')}
+                              className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${
                                 s.periodo === "Integral" ? "bg-green-600 text-white border-green-700" :
                                 s.periodo === "Matutino" ? "bg-blue-500 text-white border-blue-600" :
                                 "bg-orange-500 text-white border-orange-600"
-                              }`}>
-                              {s.periodo}
-                            </button>
+                              }`}> {s.periodo} </button>
                           </td>
-                          <td className="px-6 py-4 text-center font-bold tracking-tight">
-                            <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase border-b-2 shadow-sm ${
-                              s.colônia === "Berçário" ? "bg-pink-100 text-pink-700 border-pink-300" : "bg-indigo-100 text-indigo-700 border-indigo-300"
-                            }`}>
-                              {s.colônia}
-                            </span>
-                          </td>
+                          <td className="px-6 py-4 text-center"><span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase border-b-2 shadow-sm ${s.colônia === "Berçário" ? "bg-pink-100 text-pink-700 border-pink-300" : "bg-indigo-100 text-indigo-700 border-indigo-300"}`}> {s.colônia} </span></td>
                           <td className="px-6 py-4 text-slate-500 font-bold uppercase text-[10px]">{s.turmaOriginal}</td>
-                          {isAdmin && (
-                            <td className="px-6 py-4 text-center">
-                              <button onClick={() => removeDocument(s.id, 'students')} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          )}
+                          {isAdmin && <td className="px-6 py-4 text-center"><button onClick={() => removeDocument(s.id, 'students')} className="text-slate-300 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button></td>}
                         </tr>
                       ))}
                     </tbody>
@@ -485,54 +437,18 @@ const App = () => {
           </div>
         )}
 
-        {/* ABA 3: JORNADAS */}
+        {/* JORNADAS (EQUIPE) */}
         {activeTab === 'jornadas' && (
           <div className="space-y-6">
             {isAdmin && (
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 border-t-4 border-indigo-600 animate-in fade-in slide-in-from-top-4 duration-300">
-                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 italic uppercase tracking-tighter">
-                  <Briefcase className="w-4 h-4 text-indigo-600" /> Escalar Colaborador - S{activeWeek}
-                </h3>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 border-t-4 border-indigo-600">
+                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-tighter"><Briefcase className="w-4 h-4 text-indigo-600" /> Escalar Colaborador - S{activeWeek}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                  <input 
-                    type="text" placeholder="Nome Completo" 
-                    value={newStaff.nome} 
-                    onChange={e => setNewStaff({...newStaff, nome: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 md:col-span-2"
-                  />
-                  <select 
-                    value={newStaff.funcao} 
-                    onChange={e => setNewStaff({...newStaff, funcao: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="Professor">Professor</option>
-                    <option value="Auxiliar">Auxiliar</option>
-                    <option value="Coordenador">Coordenador</option>
-                  </select>
-                  <select 
-                    value={newStaff.turma} 
-                    onChange={e => setNewStaff({...newStaff, turma: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="Exploradores">Exploradores</option>
-                    <option value="Berçário">Berçário</option>
-                    <option value="Geral">Geral</option>
-                  </select>
-                  <select 
-                    value={newStaff.periodo} 
-                    onChange={e => setNewStaff({...newStaff, periodo: e.target.value})}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="Integral">Integral</option>
-                    <option value="Matutino">Matutino</option>
-                    <option value="Vespertino">Vespertino</option>
-                  </select>
-                  <button 
-                    onClick={addStaff}
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
-                  >
-                    <Plus className="w-4 h-4" /> Escalar
-                  </button>
+                  <input type="text" placeholder="Nome Completo" value={newStaff.nome} onChange={e => setNewStaff({...newStaff, nome: e.target.value})} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 md:col-span-2" />
+                  <select value={newStaff.funcao} onChange={e => setNewStaff({...newStaff, funcao: e.target.value})} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"><option value="Professor">Professor</option><option value="Auxiliar">Auxiliar</option><option value="Coordenador">Coordenador</option></select>
+                  <select value={newStaff.turma} onChange={e => setNewStaff({...newStaff, turma: e.target.value})} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"><option value="Exploradores">Exploradores</option><option value="Berçário">Berçário</option><option value="Geral">Geral</option></select>
+                  <select value={newStaff.periodo} onChange={e => setNewStaff({...newStaff, periodo: e.target.value})} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"><option value="Integral">Integral</option><option value="Matutino">Matutino</option><option value="Vespertino">Vespertino</option></select>
+                  <button onClick={addStaff} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-md"> <Plus className="w-4 h-4" /> Escalar </button>
                 </div>
               </div>
             )}
@@ -540,13 +456,10 @@ const App = () => {
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
               <div className="lg:col-span-1 space-y-4">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 text-center">
-                  <h2 className="font-bold text-slate-800 mb-4 text-[10px] uppercase tracking-[0.2em] opacity-60">Filtrar por Semana</h2>
+                  <h2 className="font-bold text-slate-800 mb-4 text-[10px] uppercase tracking-[0.2em] opacity-60">Semanas da Jornada</h2>
                   <div className="grid grid-cols-3 lg:grid-cols-1 gap-2">
                     {weeks.map(w => (
-                      <button key={w.id} onClick={() => setActiveWeek(w.id)}
-                        className={`p-3 rounded-xl border transition-all ${activeWeek === w.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-100 text-slate-600'}`}>
-                        <div className="font-bold text-xs uppercase tracking-widest">Semana {w.id}</div>
-                      </button>
+                      <button key={w.id} onClick={() => setActiveWeek(w.id)} className={`p-3 rounded-xl border transition-all ${activeWeek === w.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-100 text-slate-600'}`}><div className="font-bold text-xs uppercase tracking-widest text-left">Semana {w.id}</div></button>
                     ))}
                   </div>
                 </div>
@@ -555,66 +468,23 @@ const App = () => {
               <div className="lg:col-span-3">
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                    <h2 className="font-bold text-lg flex items-center gap-2 text-slate-800 uppercase tracking-tighter">
-                      Equipe Jornada: Semana {activeWeek}
-                    </h2>
+                    <h2 className="font-bold text-lg flex items-center gap-2 text-slate-800 uppercase tracking-tighter italic">Equipe Jornada: Semana {activeWeek}</h2>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full text-left text-xs text-slate-700">
                       <thead className="bg-slate-100 text-slate-500 uppercase text-[9px] font-black tracking-widest border-b border-slate-200">
-                        <tr>
-                          <th className="px-6 py-4">Colaborador</th>
-                          <th className="px-6 py-4">Função</th>
-                          <th className="px-6 py-4 text-center">Turma Vinculada</th>
-                          <th className="px-6 py-4 text-center">Turno Jornada</th>
-                          {isAdmin && <th className="px-6 py-4 text-center">Ação</th>}
-                        </tr>
+                        <tr><th className="px-6 py-4">Colaborador</th><th className="px-6 py-4">Função</th><th className="px-6 py-4 text-center">Vínculo</th><th className="px-6 py-4 text-center">Turno</th>{isAdmin && <th className="px-6 py-4 text-center">Ação</th>}</tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-slate-100 italic">
                         {filteredStaff.length > 0 ? filteredStaff.map((s) => (
                           <tr key={s.id} className="hover:bg-indigo-50/30 transition-colors">
-                            <td className="px-6 py-4 font-bold text-slate-800">
-                                {s.nome}
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-2 text-slate-500">
-                                    <GraduationCap className="w-3 h-3" />
-                                    <span className="font-medium">{s.funcao}</span>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                                <span className={`px-2 py-1 rounded-md text-[9px] font-bold ${
-                                    s.turma === "Berçário" ? "bg-pink-100 text-pink-600" : 
-                                    s.turma === "Exploradores" ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-600"
-                                }`}>
-                                    {s.turma}
-                                </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <button 
-                                disabled={!isAdmin}
-                                onClick={() => togglePeriod(s.id, s.periodo, 'staff')}
-                                className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${!isAdmin ? 'cursor-default' : 'hover:scale-105 active:scale-95 shadow-sm'} ${
-                                  s.periodo === "Integral" ? "bg-green-600 text-white border-green-700" :
-                                  s.periodo === "Matutino" ? "bg-blue-500 text-white border-blue-600" :
-                                  "bg-orange-500 text-white border-orange-600"
-                                }`}>
-                                {s.periodo}
-                              </button>
-                            </td>
-                            {isAdmin && (
-                              <td className="px-6 py-4 text-center">
-                                <button onClick={() => removeDocument(s.id, 'staff')} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </td>
-                            )}
+                            <td className="px-6 py-4 font-bold">{s.nome}</td>
+                            <td className="px-6 py-4"><div className="flex items-center gap-2"><GraduationCap className="w-3 h-3 text-slate-400" />{s.funcao}</div></td>
+                            <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded-md text-[9px] font-bold ${s.turma === "Berçário" ? "bg-pink-100 text-pink-600" : s.turma === "Exploradores" ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-600"}`}>{s.turma}</span></td>
+                            <td className="px-6 py-4 text-center"><button disabled={!isAdmin} onClick={() => togglePeriod(s.id, s.periodo, 'staff')} className={`w-32 py-1.5 rounded-full text-[9px] font-bold uppercase transition-all border ${s.periodo === "Integral" ? "bg-green-600 text-white border-green-700" : s.periodo === "Matutino" ? "bg-blue-500 text-white border-blue-600" : "bg-orange-500 text-white border-orange-600"}`}>{s.periodo}</button></td>
+                            {isAdmin && <td className="px-6 py-4 text-center"><button onClick={() => removeDocument(s.id, 'staff')} className="text-slate-300 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button></td>}
                           </tr>
-                        )) : (
-                          <tr>
-                            <td colSpan="5" className="px-6 py-12 text-center text-slate-400 italic font-medium">Nenhum colaborador escalado para S{activeWeek}.</td>
-                          </tr>
-                        )}
+                        )) : <tr><td colSpan="5" className="px-6 py-12 text-center text-slate-400 font-medium">Equipe não escalada para esta semana.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -624,15 +494,13 @@ const App = () => {
           </div>
         )}
 
-        {/* ABA 4: MATERIAIS */}
+        {/* MATERIAIS */}
         {activeTab === 'checklists' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-              <h2 className="font-bold text-slate-800 mb-6 flex items-center gap-2 uppercase text-[10px] tracking-widest border-b pb-2">
-                <CheckSquare className="w-4 h-4 text-green-500" /> Checklist de Materiais
-              </h2>
+              <h2 className="font-bold text-slate-800 mb-6 flex items-center gap-2 uppercase text-[10px] tracking-widest border-b pb-2"><CheckSquare className="w-4 h-4 text-green-500" /> Materiais Planejados</h2>
               <div className="space-y-3">
-                {["Tintas Naturais", "Rolo Papel Pardo", "Bexigas de Água", "Bacias de Banho", "Fantasias/Adereços", "Certificados"].map(item => (
+                {["Tintas Naturais (Alimentícias)", "Rolo de Papel Pardo", "Bexigas de Água", "Bacias de Plástico", "Fantasias/Adereços", "Certificados Explorador"].map(item => (
                   <label key={item} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer group hover:bg-white border border-transparent hover:border-slate-200 transition-all">
                     <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all" />
                     <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{item}</span>
@@ -641,10 +509,8 @@ const App = () => {
               </div>
             </div>
             <div className="bg-indigo-800 text-white p-6 rounded-2xl shadow-lg h-fit">
-              <h3 className="font-bold mb-3 flex items-center gap-2 italic text-sm underline underline-offset-4"><Info className="w-4 h-4" /> ALERTA DE SEGURANÇA</h3>
-              <p className="text-[11px] leading-relaxed opacity-95 font-medium italic">
-                Sempre realizar a contagem dos 14 alunos originais em cada troca de ambiente. No Berçário, o foco é 100% no bem-estar e sono. Nos Exploradores, os maiores do 1º ano são seus monitores auxiliares.
-              </p>
+              <h3 className="font-bold mb-3 flex items-center gap-2 italic text-sm underline underline-offset-4 font-serif text-amber-200"><Info className="w-4 h-4" /> Alerta de Segurança</h3>
+              <p className="text-[11px] leading-relaxed opacity-95 font-medium italic font-serif">A contagem dos alunos deve ser feita em todas as mudanças de ambiente. O Berçário exige 100% de atenção no sono e higiene. Os Exploradores maiores auxiliam os menores sob supervisão constante.</p>
             </div>
           </div>
         )}
